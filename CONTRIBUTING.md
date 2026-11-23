@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20 (the version used by CI; see `.nvmrc`)
 - A running instance of [konfirm-backend](https://github.com/konfirm-HQ/konfirm-backend) (local or deployed)
 
 ### Install and run
