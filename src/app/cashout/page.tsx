@@ -198,7 +198,7 @@ export default function CashoutPage() {
   }
 
   async function handleStart() {
-    if (inFlight.current) return;
+    if (inFlight.current || missingAddressStatus) return;
     inFlight.current = true;
     setStarting(true);
     paymentSubmitted.current = false;
@@ -342,7 +342,61 @@ export default function CashoutPage() {
             View your activity
           </Link>
         </div>
-      )}
+        {view === "form" && (
+          <div>
+            <h1>Cash out</h1>
+            <p className="sub">Move funds from your Stellar wallet to a bank account through a Stellar anchor partner.</p>
+
+            <div className="currency-toggle">
+              {(["XLM", "USDC"] as Currency[]).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`ctoggle${currency === c ? " active" : ""}`}
+                  aria-pressed={currency === c}
+                  onClick={() => setCurrency(c)}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+            <div className="limit-note">This test partner accepts between 1–10 units per cash-out.</div>
+
+            {freighterAvailable === false ? (
+              <div className="status error">
+                Cash-out requires the Freighter browser extension. Open this page in Chrome or Firefox on desktop with{" "}
+                <a href="https://freighter.app" target="_blank" rel="noopener noreferrer">Freighter installed</a>.
+              </div>
+            ) : (
+              <>
+                <button type="button" className="primary" disabled={starting || Boolean(missingAddressStatus)} onClick={handleStart}>
+                  {starting ? "Starting…" : "Connect wallet & start cash-out"}
+                </button>
+                <div className={`status${status || missingAddressStatus ? " error" : ""}`}>{status || missingAddressStatus}</div>
+              </>
+            )}
+          </div>
+        )}
+
+        {view === "progress" && (
+          <div className="progress">
+            <div className="spin" />
+            <div className="stage">{stage}</div>
+            <div className="hint">{hint}</div>
+          </div>
+        )}
+
+        {view === "success" && (
+          <div className="success-box">
+            <div className="tick">✓</div>
+            <h1 className="success-title">Cash-out complete</h1>
+            <div className="success-detail">Your funds are on their way to your bank.</div>
+            <button type="button" className="secondary" onClick={handleAnother}>
+              Start another cash-out
+            </button>
+          </div>
+        )}
+      </div>
     </main>
   );
 }
