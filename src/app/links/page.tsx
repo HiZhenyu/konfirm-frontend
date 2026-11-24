@@ -3,21 +3,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { formatAmount } from '@/lib/format';
 
 interface PaymentLink {
   id: string;
   url: string;
   amount: number;
+  asset_code: string;
   description: string | null;
   active: boolean;
   createdAt: string;
-}
-
-function formatAmount(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(amount);
 }
 
 function formatDate(value: string): string {
@@ -151,7 +146,7 @@ export default function LinksPage() {
             <li key={link.id} className="payment" style={{ flexDirection: "column", alignItems: "stretch" }}>
               <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 12 }}>
                 <div className="desc">
-                  <div className="amount" style={{ fontSize: 16 }}>{formatAmount(link.amount)}</div>
+                  <div className="amount" style={{ fontSize: 16 }}>{formatAmount(link.amount, link.asset_code)}</div>
                   {link.description && <div>{link.description}</div>}
                   <div className="from">
                     Created {formatDate(link.createdAt)}

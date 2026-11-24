@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { API_BASE } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,6 +12,52 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Redirect already-authenticated visitors before rendering the form so
+  // they never see a flash of the login UI.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+        if (!cancelled && res.ok) {
+          router.replace("/activity");
+          return;
+        }
+      } catch {
+        // Network error — just show the form.
+      }
+      if (!cancelled) setCheckingAuth(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  if (checkingAuth) return null;
+
+  // Redirect already-authenticated visitors before rendering the form so
+  // they never see a flash of the login UI.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+        if (!cancelled && res.ok) {
+          router.replace("/activity");
+          return;
+        }
+      } catch {
+        // Network error — just show the form.
+      }
+      if (!cancelled) setCheckingAuth(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
 
   // Surface a distinct banner when the user was bounced here by a real
   // session expiry (401), as opposed to a backend outage or network error.
@@ -68,6 +114,8 @@ export default function LoginPage() {
   }
 
   const invalid = Boolean(status);
+
+  if (checkingAuth) return null;
 
   return (
     <main className="auth">

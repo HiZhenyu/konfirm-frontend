@@ -76,7 +76,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         setLogoutError("Couldn't log out — try again");
         return;
       }
-      notifyLogout();
       router.push("/admin/login");
     } catch {
       setLogoutError("Couldn't log out — try again");

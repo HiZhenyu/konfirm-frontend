@@ -11,7 +11,7 @@
 // The regression check for this lives in `src/lib/api.cookie-fidelity.test.ts`.
 export const API_BASE = "/api/backend";
 
-export interface ApiSuccess<T> {
+interface ApiSuccess<T> {
   ok: true;
   status: number;
   // `data` is `T | null` because a 2xx response with an empty or non-JSON
@@ -20,7 +20,7 @@ export interface ApiSuccess<T> {
   data: T | null;
 }
 
-export interface ApiFailure {
+interface ApiFailure {
   ok: false;
   status: number;
   message: string;
@@ -84,7 +84,11 @@ function notifySessionExpired(path: string): void {
 // access on an `ApiResult`.
 export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}): Promise<ApiResult<T>> {
   const { body, headers, credentials, ...rest } = init;
-  const isJsonBody = typeof body === "string" || (body !== undefined && !(body instanceof FormData));
+  // Only a string body is JSON text by the time it reaches here — apiPost/
+  // apiPatch already JSON.stringify before calling apiFetch. Any other body
+  // shape (FormData, Blob, ReadableStream, URLSearchParams, ...) must keep
+  // its own Content-Type rather than being forced to application/json.
+  const isJsonBody = typeof body === "string";
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: credentials ?? "include",
     headers: isJsonBody
@@ -120,10 +124,6 @@ export function apiPost<T = unknown>(path: string, json?: unknown, init: Request
 
 export function apiPatch<T = unknown>(path: string, json?: unknown, init: RequestInit = {}): Promise<ApiResult<T>> {
   return apiFetch<T>(path, { ...init, method: "PATCH", body: json !== undefined ? JSON.stringify(json) : undefined });
-}
-
-export function apiDelete<T = unknown>(path: string, init: RequestInit = {}): Promise<ApiResult<T>> {
-  return apiFetch<T>(path, { ...init, method: "DELETE" });
 }
 
 // Admin list endpoints (merchants, users, wallets, referrals, pay-links,

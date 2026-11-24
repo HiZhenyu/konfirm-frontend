@@ -1,6 +1,15 @@
 "use client";
 
 import { useEffect } from "react";
+
+export default function RootError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  const pathname = usePathname();
   useEffect(() => {
     reportClientError(error, "error-boundary");
   }, [error]);

@@ -10,6 +10,7 @@ import { reportError } from "@/lib/report-error";
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   // Already-authenticated visitors shouldn't see the signup form — bounce
   // them straight to the app instead.
@@ -20,15 +21,19 @@ function SignupForm() {
         const res = await apiFetch("/auth/me");
         if (!cancelled && res.ok) {
           router.replace("/activity");
+          return;
         }
       } catch {
         // Ignore — just means we stay on the signup page.
       }
+      if (!cancelled) setCheckingAuth(false);
     })();
     return () => {
       cancelled = true;
     };
   }, [router]);
+
+  if (checkingAuth) return null;
   // Present only when someone arrived via another merchant's referral
   // link (see /referrals) — an invalid/expired code is rejected silently
   // server-side, not surfaced as an error here, since it should never
@@ -71,6 +76,8 @@ function SignupForm() {
       setSubmitting(false);
     }
   }
+
+  if (checkingAuth) return null;
 
   return (
     <div className="page-center">

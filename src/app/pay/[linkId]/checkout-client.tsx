@@ -1,11 +1,29 @@
 "use client";
 
 import { use, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import freighterApi from "@stellar/freighter-api";
 import qrcode from "qrcode-generator";
 import { API_BASE } from "@/lib/api";
 import { useCheckoutMessages, useLocale } from "@/lib/i18n";
 import { friendlyMessage, randomMuxedId } from "@/lib/checkout";
+import { reportError } from "@/lib/report-error";
+import { createClient } from "@/lib/supabase/client";
+import { formatCurrency } from "@/lib/format";
+import type { PaymentLink } from "@/lib/types";
+
+interface CheckoutClientProps {
+  linkId: string;
+  initialLinkData: PaymentLink | null;
+}
+
+import { use, useEffect, useRef, useState } from "react";
+import freighterApi from "@stellar/freighter-api";
+import qrcode from "qrcode-generator";
+import { API_BASE } from "@/lib/api";
+import { useCheckoutMessages, useLocale } from "@/lib/i18n";
+import { friendlyMessage, randomMuxedId } from "@/lib/checkout";
+import { explorerTxUrl } from "@/lib/stellar-explorer";
 import { reportError } from "@/lib/report-error";
 
 const HORIZON_URL = "https://horizon-testnet.stellar.org";
@@ -23,7 +41,6 @@ interface ConfirmedPayment {
   tx_hash: string;
   muxed_id: string;
 }
-
 
 export default function CheckoutClient({ params }: { params: Promise<{ linkId: string }> }) {
   const { linkId } = use(params);
@@ -195,11 +212,11 @@ export default function CheckoutClient({ params }: { params: Promise<{ linkId: s
     freighterApi.isConnected().then((res) => {
       setFreighterAvailable(!res.error && res.isConnected !== false);
     }).catch(() => {
-      setFreighterAvailable(false);
-    });
-  }, []);
+      s
 
   useEffect(() => {
+    if (initialLinkData) return;
+
     let cancelled = false;
     // Persisted so a page refresh resumes polling the same session instead
     // of reserving a new, unrelated one — losing track of a payment that
@@ -207,8 +224,13 @@ export default function CheckoutClient({ params }: { params: Promise<{ linkId: s
     // the old muxed_id.
     const storageKey = `konfirm:muxed_id:${linkId}`;
 
-    async function init() {
-      const res = await fetch(`${API_BASE}/links/${linkId}/public`);
+    async function fetchLink() {
+      const { data, error: fetchError } = await supabase
+        .from("payment_links")
+        .select("*")
+        .eq("id", linkId)
+        .single();
+
       if (cancelled) return;
       if (!res.ok) {
         // Distinguish dead-link reasons (not found / expired / inactive /
@@ -221,6 +243,7 @@ export default function CheckoutClient({ params }: { params: Promise<{ linkId: s
         setLoadingIsError(true);
         return;
       }
+      setLoading(false);
       const data: LinkData = await res.json();
       setLinkData(data);
       try {
@@ -249,28 +272,52 @@ export default function CheckoutClient({ params }: { params: Promise<{ linkId: s
       });
     }
 
-    init();
+    fetchLink();
+
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkId]);
+  }, [linkId, initialLinkData, supabase]);
 
-  function formatCurrency(value: string, currency: string): string {
-    const str = Number(value).toFixed(2);
-    return currency === "USDC" ? `$${str}` : `${str} ${currency}`;
+  async function handlePay() {
+    if (!linkData) return;
+    setPaying(true);
+    setError(null);
+
+    const { error: payError } = await supabase.functions.invoke("process-payment", {
+      body: { linkId: linkData.id },
+    });
+
+    if (payError) {
+      setError("Payment failed. Please try again.");
+      setPaying(false);
+      return;
+    }
+
+    router.push(`/pay/${linkId}/success`);
   }
 
-  const amountDisplay = linkData ? formatCurrency(linkData.amount_usdc, linkData.currency) : "";
-  const feeUsdc = linkData?.fee_usdc ? Number(linkData.fee_usdc) : 0;
-  const feeDisplay = linkData && feeUsdc > 0 ? formatCurrency(linkData.fee_usdc as string, linkData.currency) : "";
-  const totalDisplay =
-    linkData && feeUsdc > 0
-      ? formatCurrency((Number(linkData.amount_usdc) + feeUsdc).toString(), linkData.currency)
-      : "";
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-muted-foreground">Loading payment link…</p>
+      </div>
+    );
+  }
+
+  if (error && !linkData) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-destructive">{error}</p>
+      </div>
+    );
+  }
+
+  if (!linkData) return null;
 
   return (
     <div className="page-center">
+      <title>{`${linkData?.merchant_name ?? "Konfirm"} · Konfirm`}</title>
       <div className="card">
         <div className="brand" style={{ marginBottom: 24 }}>
           <span className="mark">✓</span> Konfirm
@@ -339,6 +386,17 @@ export default function CheckoutClient({ params }: { params: Promise<{ linkId: s
           </div>
         )}
 
+        {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
+
+        <button
+          type="button"
+          onClick={handlePay}
+          disabled={paying}
+          className="mt-6 w-full rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
+        >
+          {paying ? "Processing…" : "Pay now"}
+        </button>
+
         {confirmed && (
           <div className="success-box">
             <div className="tick">✓</div>
@@ -346,7 +404,7 @@ export default function CheckoutClient({ params }: { params: Promise<{ linkId: s
             <div className="success-detail">{t("successDetail")}</div>
             <a
               className="txlink"
-              href={`https://stellar.expert/explorer/testnet/tx/${confirmed.tx_hash}`}
+              href={explorerTxUrl(confirmed.tx_hash)}
               target="_blank"
               rel="noopener noreferrer"
             >

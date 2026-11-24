@@ -273,27 +273,14 @@ export default function NewPaymentPage() {
                 className="amount-input"
                 type="text"
                 inputMode="decimal"
-                placeholder="0.00"
+                placeholder={"0." + "0".repeat(CURRENCY_DECIMALS[currency])}
                 autoFocus
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 aria-invalid={amountInvalid}
                 aria-describedby={amountInvalid ? "form-status" : undefined}
               />
-            </div>
-            <div className="currency-toggle">
-              {(["XLM", "USDC", "EURC"] as Currency[]).map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className={`ctoggle${currency === c ? " active" : ""}`}
-                  aria-pressed={currency === c}
-                  onClick={() => setCurrency(c)}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
+        
 
             <div className="field">
               <label htmlFor="desc">What&apos;s it for?</label>
@@ -346,12 +333,6 @@ export default function NewPaymentPage() {
                 {status}
               </p>
             )}
-            <button className="btn secondary" type="button" onClick={handleAnother}>
-              Create another
-            </button>
-            <button className="btn secondary" type="button" onClick={handleAnother}>
-              Create another
-            </button>
             <Link className="secondary" href="/links">
               View my payments
             </Link>

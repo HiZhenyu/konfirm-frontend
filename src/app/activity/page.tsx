@@ -4,8 +4,9 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { API_BASE, apiPost } from "@/lib/api";
-import { useRequireAuth } from "@/lib/useAuth";
+import { useRequireAuth, broadcastLogout } from "@/lib/useAuth";
 import { formatAmount } from "@/lib/format";
+import { isTerminalAuthFailure, shouldShowPollError } from "@/lib/poll";
 import FeeSettlement from "@/components/fee-settlement";
 
 type PaymentStatus = "paid" | "held" | "refunded" | "disputed";
@@ -86,6 +87,8 @@ function ActivityContent() {
   const [dateFilter, setDateFilter] = useState<DateRangePreset>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [now, setNow] = useState<number | null>(null);
+  const [logoutError, setLogoutError] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const consecutiveFailures = useRef(0);
 
   const poll = useCallback(async () => {
@@ -95,6 +98,13 @@ function ActivityContent() {
         fetch(`${API_BASE}/payments/mine`),
         fetch(`${API_BASE}/payments/mine/pending`),
       ]);
+      // A 401 means the session is gone — retrying will never fix it. Redirect
+      // to login (same pattern as useRequireAuth) instead of feeding it into
+      // the transient-failure counter and showing a generic "poll error".
+      if (isTerminalAuthFailure(paymentsRes.status) || isTerminalAuthFailure(pendingRes.status)) {
+        router.push("/login");
+        return;
+      }
       if (!paymentsRes.ok || !pendingRes.ok) {
         consecutiveFailures.current += 1;
         if (consecutiveFailures.current >= POLL_FAILURE_THRESHOLD) setPollError(true);
@@ -111,7 +121,7 @@ function ActivityContent() {
       consecutiveFailures.current += 1;
       if (consecutiveFailures.current >= POLL_FAILURE_THRESHOLD) setPollError(true);
     }
-  }, [hasAddress]);
+  }, [hasAddress, router]);
 
   // The recursive scheduling lives here, in a plain local function, rather
   // than inside the `poll` callback referencing itself — a useCallback
@@ -161,8 +171,25 @@ function ActivityContent() {
   }, [resolved, poll]);
 
   async function handleLogout() {
-    await apiPost("/auth/logout");
-    router.push("/login");
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setLogoutError(false);
+    try {
+      const result = await apiPost("/auth/logout");
+      if (!result.ok) {
+        // The server never invalidated the session cookie — stay put so the
+        // user doesn't get a false sense of being logged out.
+        setLogoutError(true);
+        return;
+      }
+      broadcastLogout();
+      router.push("/login");
+    } catch {
+      // Network-level failure (offline/DNS/CORS) — fetch rejected.
+      setLogoutError(true);
+    } finally {
+      setLoggingOut(false);
+    }
   }
 
   // Held payments are listed but never counted as received until an admin
@@ -221,121 +248,118 @@ function ActivityContent() {
           Admin preview — viewing as merchant
         </div>
       )}
-      {pollError && (
-        <div
-          role="alert"
-          style={{
-            background: "var(--warn, #b45309)",
-            color: "#fff",
-            padding: "10px 16px",
-            fontWeight: 600,
-            fontSize: 13,
-          }}
-        >
-          Having trouble reaching the server — retrying…
-        </div>
-      )}
       <div className="header-row">
         <div className="brand">
           <span className="mark">✓</span> Konfirm
         </div>
         {showNav && (
           <div className="nav-actions">
-            <Link href="/dashboard" className="btn secondary">
-              Dashboard
+            <Link href="/links" className="btn btn-secondary">
+              Payment links
             </Link>
-            <button className="btn secondary" onClick={handleLogout}>
+            <button type="button" className="btn btn-secondary" onClick={handleLogout}>
               Log out
             </button>
           </div>
         )}
       </div>
-      <h1>Activity</h1>
-      <p className="sub">Live payments as they arrive.</p>
 
-      {hasBalances && (
-        <div className="totals">
-          {Object.entries(totals).map(([asset, amount]) => (
-            <div key={asset} className="total-card">
-              <div className="total-label">{asset} received</div>
-              <div className="total-amount">{formatAmount(amount, asset)}</div>
-            </div>
-          ))}
+      <div className="card">
+        <div className="card-header">
+          <h2>Activity</h2>
+          {pollError && (
+            <span className="badge badge-warn" role="status">
+              Live updates paused — reconnecting…
+            </span>
+          )}
         </div>
-      )}
 
-      <div className="filters">
-        <div className="filter-group">
+        {hasBalances && (
+          <div className="balances">
+            {Object.entries(totals).map(([asset, amount]) => (
+              <div key={asset} className="balance">
+                <span className="balance-amount">{formatAmount(amount, asset)}</span>
+                <span className="balance-label">received</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="filters">
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.value}
-              className={`chip ${statusFilter === f.value ? "active" : ""}`}
+              type="button"
+              className={`chip ${statusFilter === f.value ? "chip-active" : ""}`}
               onClick={() => setStatusFilter(f.value)}
             >
               {f.label}
             </button>
           ))}
+          <select
+            className="select"
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value as DateRangePreset)}
+          >
+            {DATE_RANGE_FILTERS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
         </div>
-        <div className="filter-group">
-          {DATE_RANGE_FILTERS.map((f) => (
-            <button
-              key={f.value}
-              className={`chip ${dateFilter === f.value ? "active" : ""}`}
-              onClick={() => setDateFilter(f.value)}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+
+        {filteredPayments.length === 0 ? (
+          <div className="empty">No payments yet.</div>
+        ) : (
+          <ul className="payment-list">
+            {filteredPayments.map((p) => (
+              <li key={p.id} className="payment-row">
+                <button
+                  type="button"
+                  className="payment-summary"
+                  onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
+                >
+                  <span className="payment-amount">{formatAmount(Number(p.net_usdc), p.asset_code)}</span>
+                  <span className={`badge badge-${p.status}`}>{p.status}</span>
+                  {p.status === "held" && (
+                    <span className="payment-reason">
+                      {p.flag_reason ? HOLD_REASON_TEXT[p.flag_reason] ?? HOLD_FALLBACK : HOLD_FALLBACK}
+                    </span>
+                  )}
+                  <span className="payment-time">{new Date(p.created_at).toLocaleString()}</span>
+                </button>
+                {expandedId === p.id && (
+                  <div className="payment-detail">
+                    <div>
+                      <strong>From:</strong> {p.payer_address}
+                    </div>
+                    {p.link_description && (
+                      <div>
+                        <strong>Link:</strong> {p.link_description}
+                      </div>
+                    )}
+                    <div>
+                      <strong>ID:</strong> {p.id}
+                    </div>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
-      {filteredPayments.length === 0 ? (
-        <div className="empty">No payments yet.</div>
-      ) : (
-        <div className="list">
-          {filteredPayments.map((p) => (
-            <div key={p.id} className="row">
-              <button
-                className="row-main"
-                onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
-              >
-                <span className="row-amount">{formatAmount(Number(p.net_usdc), p.asset_code)}</span>
-                <span className={`badge ${p.status}`}>{p.status}</span>
-                {p.link_description && <span className="row-desc">{p.link_description}</span>}
-              </button>
-              {expandedId === p.id && (
-                <div className="row-detail">
-                  <div>
-                    <strong>Payer:</strong> {p.payer_address}
-                  </div>
-                  <div>
-                    <strong>Received:</strong> {new Date(p.created_at).toLocaleString()}
-                  </div>
-                  {p.status === "held" && (
-                    <div className="hold-reason">
-                      {HOLD_REASON_TEXT[p.flag_reason ?? ""] ?? HOLD_FALLBACK}
-                    </div>
-                  )}
-                  {p.fee_status !== "none" && (
-                    <FeeSettlement
-                      feeStatus={p.fee_status}
-                      feeOwedRaw={p.fee_owed_raw}
-                      feeAssetCode={p.fee_asset_code}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {pending && <div className="empty">A payment is pending confirmation…</div>}
+
+      {hasAddress && <FeeSettlement />}
     </div>
   );
 }
 
 export default function ActivityPage() {
   return (
-    <Suspense fallback={<div className="wrap"><div className="empty">Loading…</div></div>}>
+    <Suspense fallback={<div className="empty">Loading…</div>}>
       <ActivityContent />
     </Suspense>
   );
